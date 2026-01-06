@@ -882,7 +882,7 @@ export default function GitHubMonitor() {
                     : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
                 }`}
               >
-                Invitations (élèves)
+                Invitations
               </button>
               
               <div className="mx-2 h-6 w-px bg-gray-600"></div>
