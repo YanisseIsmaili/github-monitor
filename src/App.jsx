@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { RefreshCw, GitBranch, Calendar, User, ExternalLink, Github, GripVertical, Search, X, ChevronDown, ChevronUp, Palette, BarChart3, Grid3x3, TrendingUp, Award, Clock, AlertCircle } from 'lucide-react';
+import { RefreshCw, GitBranch, Calendar, User, ExternalLink, Github, GripVertical, Search, X, ChevronDown, ChevronUp, Palette, BarChart3, Grid3x3, TrendingUp, Award, Clock, AlertCircle, Tag, Filter } from 'lucide-react';
 import {
   DndContext,
   closestCenter,
@@ -17,7 +17,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 
-function SortableRepoCard({ repo, formatDate, isCollapsed, onToggleCollapse, colorClasses, showColorPicker, onToggleColorPicker, availableColors, onSetColor }) {
+function SortableRepoCard({ repo, formatDate, isCollapsed, onToggleCollapse, colorClasses, showColorPicker, onToggleColorPicker, availableColors, onSetColor, tags, showTagPicker, onToggleTagPicker, availableTags, onToggleTag }) {
   const {
     attributes,
     listeners,
@@ -55,7 +55,7 @@ function SortableRepoCard({ repo, formatDate, isCollapsed, onToggleCollapse, col
             </div>
             
             <div className="flex-1">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <a
                   href={repo.html_url}
                   target="_blank"
@@ -70,6 +70,12 @@ function SortableRepoCard({ repo, formatDate, isCollapsed, onToggleCollapse, col
                     Invité
                   </span>
                 )}
+                {/* Affichage des tags */}
+                {tags.map(tag => (
+                  <span key={tag.id} className={`px-2 py-0.5 ${tag.color} ${tag.textColor} text-xs rounded font-medium`}>
+                    {tag.name}
+                  </span>
+                ))}
               </div>
               {!isCollapsed && repo.description && (
                 <p className="text-sm text-gray-400 mt-1">{repo.description}</p>
@@ -78,6 +84,46 @@ function SortableRepoCard({ repo, formatDate, isCollapsed, onToggleCollapse, col
           </div>
           
           <div className="flex items-center gap-2">
+            {/* Bouton de tags */}
+            <div className="relative">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleTagPicker(repo.id);
+                }}
+                className="p-1 text-gray-400 hover:text-white transition-colors"
+                title="Ajouter des tags"
+              >
+                <Tag size={20} />
+              </button>
+              
+              {/* Tag Picker Dropdown */}
+              {showTagPicker === repo.id && (
+                <div className="absolute right-0 top-full mt-2 z-50 bg-gray-750 border border-gray-600 rounded-lg shadow-xl p-2 min-w-[140px]">
+                  <div className="text-xs text-gray-400 mb-2 px-2">Tags</div>
+                  {availableTags.map((tag) => {
+                    const isActive = tags.some(t => t.id === tag.id);
+                    return (
+                      <button
+                        key={tag.id}
+                        onClick={() => onToggleTag(repo.id, tag.id)}
+                        className={`w-full flex items-center gap-2 px-3 py-2 rounded hover:bg-gray-700 transition-colors ${
+                          isActive ? 'bg-gray-700' : ''
+                        }`}
+                      >
+                        <div className={`w-4 h-4 rounded border-2 flex items-center justify-center ${
+                          isActive ? tag.color : 'border-gray-600'
+                        }`}>
+                          {isActive && <div className="w-2 h-2 bg-white rounded-sm"></div>}
+                        </div>
+                        <span className="text-sm text-gray-200">{tag.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
             {/* Bouton de couleur */}
             <div className="relative">
               <button
@@ -184,6 +230,19 @@ export default function GitHubMonitor() {
   const [repoColors, setRepoColors] = useState({});
   const [showColorPicker, setShowColorPicker] = useState(null);
   const [viewType, setViewType] = useState('grid'); // 'grid' ou 'analytics'
+  const [repoTags, setRepoTags] = useState({});
+  const [showTagPicker, setShowTagPicker] = useState(null);
+  const [activeTagFilter, setActiveTagFilter] = useState(null);
+
+  const availableTags = [
+    { id: 'b1', name: 'B1', color: 'bg-blue-600', textColor: 'text-blue-100' },
+    { id: 'b2', name: 'B2', color: 'bg-green-600', textColor: 'text-green-100' },
+    { id: 'projet-cours', name: 'Projet cours', color: 'bg-orange-600', textColor: 'text-orange-100' },
+    { id: 'projet-perso', name: 'Projet perso', color: 'bg-purple-600', textColor: 'text-purple-100' },
+    { id: 'en-cours', name: 'En cours', color: 'bg-yellow-600', textColor: 'text-yellow-100' },
+    { id: 'pas-termine', name: 'Pas terminé', color: 'bg-red-600', textColor: 'text-red-100' },
+    { id: 'termine', name: 'Terminé', color: 'bg-emerald-600', textColor: 'text-emerald-100' },
+  ];
 
   const availableColors = [
     { name: 'Aucune', value: null, border: 'border-gray-700', bg: 'bg-gray-800' },
@@ -301,20 +360,70 @@ export default function GitHubMonitor() {
       const reposWithCommits = await Promise.all(
         uniqueRepos.map(async (repo) => {
           try {
-            const commitsResponse = await fetch(`https://api.github.com/repos/${repo.full_name}/commits?per_page=5`, {
-              headers: {
-                'Authorization': `token ${token}`,
-                'Accept': 'application/vnd.github.v3+json'
-              }
-            });
+            let allCommits = [];
             
-            const commits = commitsResponse.ok ? await commitsResponse.json() : [];
+            // Essaie d'abord de récupérer les commits de toutes les branches
+            try {
+              const branchesResponse = await fetch(`https://api.github.com/repos/${repo.full_name}/branches`, {
+                headers: {
+                  'Authorization': `token ${token}`,
+                  'Accept': 'application/vnd.github.v3+json'
+                }
+              });
+              
+              if (branchesResponse.ok) {
+                const branches = await branchesResponse.json();
+                
+                // Pour chaque branche, récupère les commits
+                for (const branch of branches.slice(0, 3)) {
+                  try {
+                    const commitsResponse = await fetch(`https://api.github.com/repos/${repo.full_name}/commits?sha=${branch.name}&per_page=10`, {
+                      headers: {
+                        'Authorization': `token ${token}`,
+                        'Accept': 'application/vnd.github.v3+json'
+                      }
+                    });
+                    
+                    if (commitsResponse.ok) {
+                      const branchCommits = await commitsResponse.json();
+                      allCommits = [...allCommits, ...branchCommits];
+                    }
+                  } catch (branchErr) {
+                    console.log(`Erreur branche ${branch.name}:`, branchErr);
+                  }
+                }
+              }
+            } catch (branchesErr) {
+              console.log('Erreur récupération branches, fallback sur branche par défaut');
+            }
+            
+            // Si aucun commit récupéré, essaie la branche par défaut
+            if (allCommits.length === 0) {
+              const defaultCommitsResponse = await fetch(`https://api.github.com/repos/${repo.full_name}/commits?per_page=10`, {
+                headers: {
+                  'Authorization': `token ${token}`,
+                  'Accept': 'application/vnd.github.v3+json'
+                }
+              });
+              
+              if (defaultCommitsResponse.ok) {
+                allCommits = await defaultCommitsResponse.json();
+              }
+            }
+            
+            // Déduplique les commits par SHA et garde les 10 plus récents
+            const uniqueCommits = Array.from(
+              new Map(allCommits.map(c => [c.sha, c])).values()
+            )
+            .sort((a, b) => new Date(b.commit.author.date) - new Date(a.commit.author.date))
+            .slice(0, 10);
             
             return {
               ...repo,
-              recent_commits: commits
+              recent_commits: uniqueCommits
             };
           } catch (err) {
+            console.log(`Erreur repo ${repo.name}:`, err);
             return {
               ...repo,
               recent_commits: []
@@ -395,6 +504,11 @@ export default function GitHubMonitor() {
     if (savedColors) {
       setRepoColors(JSON.parse(savedColors));
     }
+
+    const savedTags = localStorage.getItem('repo_tags');
+    if (savedTags) {
+      setRepoTags(JSON.parse(savedTags));
+    }
   }, []);
 
   const toggleCollapse = (repoId) => {
@@ -430,6 +544,33 @@ export default function GitHubMonitor() {
     return colorObj || availableColors[0];
   };
 
+  const toggleRepoTag = (repoId, tagId) => {
+    setRepoTags(prev => {
+      const newTags = { ...prev };
+      if (!newTags[repoId]) {
+        newTags[repoId] = [];
+      }
+      
+      const tagIndex = newTags[repoId].indexOf(tagId);
+      if (tagIndex > -1) {
+        newTags[repoId] = newTags[repoId].filter(t => t !== tagId);
+        if (newTags[repoId].length === 0) {
+          delete newTags[repoId];
+        }
+      } else {
+        newTags[repoId] = [...newTags[repoId], tagId];
+      }
+      
+      localStorage.setItem('repo_tags', JSON.stringify(newTags));
+      return newTags;
+    });
+  };
+
+  const getRepoTags = (repoId) => {
+    const tagIds = repoTags[repoId] || [];
+    return availableTags.filter(tag => tagIds.includes(tag.id));
+  };
+
   // Filtre et trie les repos
   const getDisplayedRepos = () => {
     let filtered = repos;
@@ -441,6 +582,14 @@ export default function GitHubMonitor() {
         repo.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
         repo.full_name.toLowerCase().includes(searchQuery.toLowerCase())
       );
+    }
+
+    // Filtre par tag
+    if (activeTagFilter) {
+      filtered = filtered.filter(repo => {
+        const tags = repoTags[repo.id] || [];
+        return tags.includes(activeTagFilter);
+      });
     }
 
     // Trie selon l'ordre personnalisé
@@ -472,12 +621,15 @@ export default function GitHubMonitor() {
 
   // Ferme le color picker en cliquant ailleurs
   useEffect(() => {
-    const handleClickOutside = () => setShowColorPicker(null);
-    if (showColorPicker) {
+    const handleClickOutside = () => {
+      setShowColorPicker(null);
+      setShowTagPicker(null);
+    };
+    if (showColorPicker || showTagPicker) {
       document.addEventListener('click', handleClickOutside);
       return () => document.removeEventListener('click', handleClickOutside);
     }
-  }, [showColorPicker]);
+  }, [showColorPicker, showTagPicker]);
 
   // Calcul des statistiques
   const calculateStats = () => {
@@ -732,6 +884,39 @@ export default function GitHubMonitor() {
               >
                 Invitations (élèves)
               </button>
+              
+              <div className="mx-2 h-6 w-px bg-gray-600"></div>
+              
+              {/* Filtres par tags */}
+              <div className="flex items-center gap-2">
+                <Filter size={16} className="text-gray-400" />
+                <button
+                  onClick={() => setActiveTagFilter(null)}
+                  className={`px-2 py-1 rounded text-xs transition-colors ${
+                    activeTagFilter === null
+                      ? 'bg-gray-600 text-white'
+                      : 'bg-gray-700 text-gray-400 hover:bg-gray-600'
+                  }`}
+                >
+                  Tous
+                </button>
+                {availableTags.map(tag => {
+                  const count = repos.filter(r => (repoTags[r.id] || []).includes(tag.id)).length;
+                  return (
+                    <button
+                      key={tag.id}
+                      onClick={() => setActiveTagFilter(activeTagFilter === tag.id ? null : tag.id)}
+                      className={`px-2 py-1 rounded text-xs font-medium transition-colors ${
+                        activeTagFilter === tag.id
+                          ? `${tag.color} ${tag.textColor}`
+                          : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+                      }`}
+                    >
+                      {tag.name} {count > 0 && `(${count})`}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
             {/* Barre de recherche */}
@@ -984,6 +1169,11 @@ export default function GitHubMonitor() {
                     onToggleColorPicker={(id) => setShowColorPicker(showColorPicker === id ? null : id)}
                     availableColors={availableColors}
                     onSetColor={setRepoColor}
+                    tags={getRepoTags(repo.id)}
+                    showTagPicker={showTagPicker}
+                    onToggleTagPicker={(id) => setShowTagPicker(showTagPicker === id ? null : id)}
+                    availableTags={availableTags}
+                    onToggleTag={toggleRepoTag}
                   />
                 ))}
               </div>
